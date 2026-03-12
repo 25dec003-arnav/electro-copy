@@ -4,6 +4,7 @@ import { NotificationManager } from './notifications/NotificationManager';
 import PalmingAudio from './PalmingAudio';
 import Module20 from './20Module';
 import EyeMassage from './EyeMassage';
+import FocusShifter from './assets/focusshifter.jsx';
 
 // Eye Landmark Indices
 const LEFT_EYE = [33, 160, 158, 133, 153, 144];
@@ -37,7 +38,8 @@ function App() {
   const [statusText, setStatusText] = useState("Downloading AI Models (Takes 5-10s first time)...");
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [therapyView, setTherapyView] = useState('initial'); // 'initial' or 'menu'
+  const [therapyView, setTherapyView] = useState('initial'); // 'initial', 'menu', or 'active'
+  const [activeModule, setActiveModule] = useState(null);
   const [, setRenderTick] = useState(0); // Used to ensure React always renders 30fps smooth updates
   
   const videoRef = useRef(null);
@@ -251,11 +253,19 @@ function App() {
           return;
       }
       
-      // Hackathon Simulation: Fake a successful session completion
+      if (moduleName === "Focus Shifter") {
+          setActiveModule("Focus Shifter");
+          setTherapyView('active');
+          if (!isModalOpen) setIsModalOpen(true);
+          return;
+      }
+      
+      // Hackathon Simulation: Fake a successful session completion for unbuilt modules
       alert(`[SIMULATION RUNNING] Starting virtual session: ${moduleName}...\n\n(Click OK to fast-forward 5 minutes and simulate successful completion)`);
       
       setIsModalOpen(false);
       setTherapyView('initial');
+      setActiveModule(null);
       
       // They completed the therapy, so strain actually drops to 0 mathematically!
       engineState.current.strain = 0; 
@@ -270,6 +280,7 @@ function App() {
       alert("⚠️ Session Aborted!\n\nIf you must return to work, PLEASE look away from the screen for at least 2 minutes. OptiSync will continue to monitor your camera for resting behavior.");
       setIsModalOpen(false);
       setTherapyView('initial');
+      setActiveModule(null);
       
       // Do NOT reset the strain to 50! Give a 2-minute cooldown so the modal doesn't immediately snap back while they try to look away.
       engineState.current.modalCooldownUntil = Date.now() + 120 * 1000; 
@@ -496,7 +507,7 @@ function App() {
                      <button className="btn-huge mt-4" onClick={() => setTherapyView('menu')}>Enter Therapy Session</button>
                      <button className="btn-text" onClick={abortSession}>Close and Resume (Not Recommended)</button>
                   </>
-               ) : (
+               ) : therapyView === 'menu' ? (
                   <div className="therapy-menu-view">
                      <h2>Select Therapy Protocol</h2>
                      <p style={{ color: 'var(--text-muted)', marginBottom: '3rem' }}>Completing a module will reset your strain levels.</p>
@@ -517,6 +528,21 @@ function App() {
                      </div>
                      <button className="btn-text" onClick={abortSession} style={{ marginTop: '3rem' }}>Abort Session (Return to work)</button>
                   </div>
+               ) : (
+                  activeModule === "Focus Shifter" && (
+                     <FocusShifter 
+                        onComplete={() => {
+                           engineState.current.strain = 0;
+                           engineState.current.modalTriggered = false;
+                           engineState.current.modalCooldownUntil = Date.now() + 60000;
+                           setStrainLevel(0);
+                           setIsModalOpen(false);
+                           setTherapyView('initial');
+                           setActiveModule(null);
+                        }}
+                        onCancel={abortSession}
+                     />
+                  )
                )}
             </div>
          </div>
