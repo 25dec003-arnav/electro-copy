@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 import { NotificationManager } from './notifications/NotificationManager';
 import FocusShifter from './assets/focusshifter.jsx';
+import InfinityTracker from './infinityTracker.jsx';
+import CornerTaps from './corner tap.jsx';
 
 // Eye Landmark Indices
 const LEFT_EYE = [33, 160, 158, 133, 153, 144];
@@ -106,6 +108,9 @@ function App() {
                 
                 // Expose Live EAR string to React State for the Dashboard to render smoothly
                 setLiveEAR(averageEAR.toFixed(3));
+
+                // Broadcast raw landmarks for advanced therapy modules (like Gaze Tracking)
+                window.dispatchEvent(new CustomEvent('OPTISYNC_LANDMARKS', { detail: landmarks }));
 
                 const CLOSED_THRESH = 0.20;
                 const PARTIAL_THRESH = 0.26;
@@ -231,6 +236,20 @@ function App() {
       
       if (moduleName === "Focus Shifter") {
           setActiveModule("Focus Shifter");
+          setTherapyView('active');
+          if (!isModalOpen) setIsModalOpen(true);
+          return;
+      }
+      
+      if (moduleName === "Infinity Tracker") {
+          setActiveModule("Infinity Tracker");
+          setTherapyView('active');
+          if (!isModalOpen) setIsModalOpen(true);
+          return;
+      }
+      
+      if (moduleName === "Corner Taps") {
+          setActiveModule("Corner Taps");
           setTherapyView('active');
           if (!isModalOpen) setIsModalOpen(true);
           return;
@@ -457,20 +476,50 @@ function App() {
                      <button className="btn-text" onClick={abortSession} style={{ marginTop: '3rem' }}>Abort Session (Return to work)</button>
                   </div>
                ) : (
-                  activeModule === "Focus Shifter" && (
-                     <FocusShifter 
-                        onComplete={() => {
-                           engineState.current.strain = 0;
-                           engineState.current.modalTriggered = false;
-                           engineState.current.modalCooldownUntil = Date.now() + 60000;
-                           setStrainLevel(0);
-                           setIsModalOpen(false);
-                           setTherapyView('initial');
-                           setActiveModule(null);
-                        }}
-                        onCancel={abortSession}
-                     />
-                  )
+                  <>
+                     {activeModule === "Focus Shifter" && (
+                        <FocusShifter 
+                           onComplete={() => {
+                              engineState.current.strain = 0;
+                              engineState.current.modalTriggered = false;
+                              engineState.current.modalCooldownUntil = Date.now() + 60000;
+                              setStrainLevel(0);
+                              setIsModalOpen(false);
+                              setTherapyView('initial');
+                              setActiveModule(null);
+                           }}
+                           onCancel={abortSession}
+                        />
+                     )}
+                     {activeModule === "Infinity Tracker" && (
+                        <InfinityTracker 
+                           onComplete={() => {
+                              engineState.current.strain = 0;
+                              engineState.current.modalTriggered = false;
+                              engineState.current.modalCooldownUntil = Date.now() + 60000;
+                              setStrainLevel(0);
+                              setIsModalOpen(false);
+                              setTherapyView('initial');
+                              setActiveModule(null);
+                           }}
+                           onCancel={abortSession}
+                        />
+                     )}
+                     {activeModule === "Corner Taps" && (
+                        <CornerTaps 
+                           onComplete={() => {
+                              engineState.current.strain = 0;
+                              engineState.current.modalTriggered = false;
+                              engineState.current.modalCooldownUntil = Date.now() + 60000;
+                              setStrainLevel(0);
+                              setIsModalOpen(false);
+                              setTherapyView('initial');
+                              setActiveModule(null);
+                           }}
+                           onCancel={abortSession}
+                        />
+                     )}
+                  </>
                )}
             </div>
          </div>
