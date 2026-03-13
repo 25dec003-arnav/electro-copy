@@ -54,4 +54,25 @@ export class NotificationManager {
       // If we are in the foreground, we could request it, but typically we shouldn't unless triggered by click.
     }
   }
+
+  static sendProximityAlert() {
+    if (!("Notification" in window)) return;
+
+    if (Notification.permission === "granted") {
+      try {
+        const notification = new Notification("CRITICAL: Proximity Hazard", {
+          body: "You have been too close to the screen for over 90 seconds. This is damaging your vision. Please move back!",
+          icon: "/vite.svg",
+          requireInteraction: true
+        });
+        
+        notification.onclick = function() {
+          window.focus();
+          this.close();
+        };
+      } catch (e) {
+        console.error("Failed to send notification:", e);
+      }
+    }
+  }
 }

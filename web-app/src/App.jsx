@@ -13,12 +13,6 @@ const LEFT_EYE = [33, 160, 158, 133, 153, 144];
 const RIGHT_EYE = [362, 385, 387, 263, 373, 380];
 const EAR_THRESHOLD = 0.25;
 
-// Screen Distance Constants
-const FOCAL_LENGTH = 500;       // Default focal length (pixels), will be calibrated later
-const AVG_EYE_DISTANCE_CM = 6.3; // Average inter-eye distance in cm
-const DANGER_DISTANCE_CM = 25;  // Too close threshold
-const SAFE_DISTANCE_CM = 40;    // Safe distance to auto-dismiss danger modal
-
 function calculateDistance(p1, p2) {
     return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
 }
@@ -46,16 +40,16 @@ function App() {
   const [statusText, setStatusText] = useState("Downloading AI Models (Takes 5-10s first time)...");
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [therapyView, setTherapyView] = useState('initial'); // 'initial', 'menu', or 'active'
+  const [therapyView, setTherapyView] = useState('initial'); // 'initial', 'menu', or 'active', 'proximity_hazard'
   const [activeModule, setActiveModule] = useState(null);
-  const [, setRenderTick] = useState(0); // Used to ensure React always renders 30fps smooth updates
+  const [, setRenderTick] = useState(0); 
   const [lookAwayDisplay, setLookAwayDisplay] = useState(45);
-  const [connectionStatus, setConnectionStatus] = useState('idle'); // 'idle', 'connecting', 'active', 'error'
+  const [connectionStatus, setConnectionStatus] = useState('idle'); 
   
-  // Screen Distance Tracking
-  const [distanceCm, setDistanceCm] = useState(null);
-  const [dangerTimerDisplay, setDangerTimerDisplay] = useState(0);
-  const [isPostureDangerModalOpen, setIsPostureDangerModalOpen] = useState(false);
+  // New Proximity States
+  const [currentDistance, setCurrentDistance] = useState(null);
+  const [proximityStatus, setProximityStatus] = useState('SAFE'); // 'SAFE', 'WARNING', 'HAZARD'
+  const [proximityTimeLeft, setProximityTimeLeft] = useState(90);
   
   const videoRef = useRef(null);
   const engineState = useRef({
@@ -72,9 +66,8 @@ function App() {
     lastFaceTime: Date.now(),
     lookAwayActive: false,
     lookAwayTimeLeft: 0,
-    // Screen distance danger timer
-    dangerTimer: 0,           // seconds accumulated too close to screen
-    dangerModalShown: false   // whether the posture danger modal is currently shown
+    proximityStartTime: null,
+    proximityAlertTriggered: false
   });
 
   useEffect(() => {
@@ -140,55 +133,6 @@ function App() {
                 setStatusText("Engine Active - Tracking");
                 state.lastFaceTime = now;
                 const landmarks = results.multiFaceLandmarks[0];
-
-                // --- Screen Distance Tracking ---
-                // Landmarks 145 (left eye lower lid) and 374 (right eye lower lid)
-                const leftEyeL = landmarks[145];
-                const rightEyeL = landmarks[374];
-                const videoW = videoRef.current?.videoWidth || 640;
-                const videoH = videoRef.current?.videoHeight || 480;
-                
-                // Convert normalized coords to pixel space
-                const leftPx = { x: leftEyeL.x * videoW, y: leftEyeL.y * videoH };
-                const rightPx = { x: rightEyeL.x * videoW, y: rightEyeL.y * videoH };
-                
-                // Euclidean pixel distance between eyes
-                const pixelDist = Math.sqrt(
-                    Math.pow(rightPx.x - leftPx.x, 2) +
-                    Math.pow(rightPx.y - leftPx.y, 2)
-                );
-                
-                // Real-world depth estimation: distance_cm = (eye_width_cm * focal_length) / pixel_dist
-                const calculatedDist = pixelDist > 0
-                    ? (AVG_EYE_DISTANCE_CM * FOCAL_LENGTH) / pixelDist
-                    : null;
-
-                if (calculatedDist !== null) {
-                    setDistanceCm(calculatedDist);
-                    
-                    if (calculatedDist < DANGER_DISTANCE_CM) {
-                        // Accumulate danger time
-                        state.dangerTimer += dtSec;
-                        setDangerTimerDisplay(Math.min(90, state.dangerTimer));
-                        
-                        // Trigger posture danger modal after 90 continuous seconds
-                        if (state.dangerTimer >= 90 && !state.dangerModalShown) {
-                            state.dangerModalShown = true;
-                            setIsPostureDangerModalOpen(true);
-                        }
-                    } else {
-                        // User is at a reasonable distance — reset danger timer
-                        state.dangerTimer = 0;
-                        setDangerTimerDisplay(0);
-                        
-                        // Auto-dismiss posture danger modal when safe distance (>40cm) is reached
-                        if (state.dangerModalShown && calculatedDist > SAFE_DISTANCE_CM) {
-                            state.dangerModalShown = false;
-                            setIsPostureDangerModalOpen(false);
-                        }
-                    }
-                }
-                // --- End Screen Distance Tracking ---
                 
                 const leftEAR = calculateEAR(landmarks, LEFT_EYE);
                 const rightEAR = calculateEAR(landmarks, RIGHT_EYE);
@@ -256,13 +200,45 @@ function App() {
                 // Chrome Extension Integration: Broadcast live strain to content.js
                 window.dispatchEvent(new CustomEvent('OPTISYNC_STRAIN_PING', { detail: { strain: roundedStrain } }));
 
-                // Modal Trigger
-                if (state.strain >= 80 && !state.modalTriggered && now > state.modalCooldownUntil) {
-                    state.modalTriggered = true;
-                    setIsModalOpen(true);
-                    NotificationManager.sendHighFatigueAlert(Math.round(state.strain));
-                }
+                // --- PROXIMITY DETECTION ENGINE ---
+                // Heuristic: Use the distance between inner eye corners (landmarks 133 and 362)
+                // On a standard 720p/1080p webcam, 25cm is roughly where the eye-span takes up ~18% of frame width.
+                const innerDist = calculateDistance(landmarks[133], landmarks[362]);
                 
+                // Estimate CM (Rough calibration: 25cm approx 0.18 normalized dist)
+                // Formula: Dist_cm = Constant / Normalized_Pixel_Dist
+                const estimatedCm = Math.round(4.5 / innerDist);
+                setCurrentDistance(estimatedCm);
+
+                if (estimatedCm < 25) {
+                    if (!state.proximityStartTime) {
+                        state.proximityStartTime = now;
+                    }
+                    const elapsed = (now - state.proximityStartTime) / 1000;
+                    const remaining = Math.max(0, 90 - elapsed);
+                    setProximityTimeLeft(Math.floor(remaining));
+                    
+                    if (remaining < 30) {
+                        setProximityStatus('HAZARD');
+                    } else {
+                        setProximityStatus('WARNING');
+                    }
+
+                    // Trigger Alert at 90 seconds
+                    if (remaining <= 0 && !state.proximityAlertTriggered) {
+                        state.proximityAlertTriggered = true;
+                        setTherapyView('proximity_hazard');
+                        setIsModalOpen(true);
+                        NotificationManager.sendProximityAlert();
+                    }
+                } else {
+                    // Reset proximity timer if they move back
+                    state.proximityStartTime = null;
+                    state.proximityAlertTriggered = false;
+                    setProximityTimeLeft(90);
+                    setProximityStatus('SAFE');
+                }
+
             } else {
                 setStatusText("No Face Detected (Resting)");
                 setLiveEAR("N/A");
@@ -479,19 +455,6 @@ function App() {
                  <div className="webcam-status-overlay" style={{ background: statusText.includes("Face") ? "rgba(255, 71, 87, 0.8)" : "rgba(46, 204, 113, 0.6)" }}>
                      {statusText}
                  </div>
-                 {/* Screen Distance Badge */}
-                 {distanceCm !== null && (
-                   <div className={`distance-badge ${
-                     distanceCm < DANGER_DISTANCE_CM ? 'distance-danger' :
-                     distanceCm < SAFE_DISTANCE_CM  ? 'distance-warning' : 'distance-safe'
-                   }`}>
-                     <span className="distance-icon">📏</span>
-                     <span>{distanceCm.toFixed(1)} cm</span>
-                     {dangerTimerDisplay > 0 && (
-                       <span className="danger-timer-badge">⏱ {Math.floor(dangerTimerDisplay)}s</span>
-                     )}
-                   </div>
-                 )}
               </div>
             </div>
 
@@ -521,13 +484,31 @@ function App() {
                          <div className="diag-value huge-text" style={{ color: '#1abc9c'}}>{liveEAR}</div>
                      </div>
                  </div>
+
+                 {/* Block 3: Proximity Sensor */}
+                 <div className={`diagnostic-block proximity-block ${proximityStatus.toLowerCase()}`}>
+                     <div className="diag-icon">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"/></svg>
+                     </div>
+                     <div className="diag-content">
+                         <h4>Screen distance</h4>
+                         <div className="diag-value huge-text">
+                             {currentDistance || "--"} <span style={{fontSize: '1rem'}}>cm</span>
+                         </div>
+                     </div>
+                     {proximityStatus !== 'SAFE' && (
+                         <div className="proximity-timer-badge">
+                             {proximityTimeLeft}s
+                         </div>
+                     )}
+                 </div>
               </div>
 
-              {/* Block 3: Status Module */}
-              <div className="diagnostic-block status-block-premium" style={{ borderColor: ringColor, background: `rgba(255,255,255,0.02)` }}>
+              {/* Block 4: Status Module */}
+              <div className="diagnostic-block status-block-premium" style={{ borderColor: proximityStatus === 'HAZARD' ? '#ff4757' : ringColor, background: `rgba(255,255,255,0.02)` }}>
                  <div className="diag-content" style={{ width: '100%', textAlign: 'center' }}>
                      <h4 style={{ letterSpacing: '2px', color: 'rgba(255,255,255,0.5)' }}>SYSTEM STATUS OVERRIDE</h4>
-                     <div className="status-label" style={{color: ringColor, fontSize: '1.8rem', margin: '10px 0', textShadow: `0 0 15px ${ringColor}80`, fontFamily: 'Outfit', fontWeight: 700}}>{statusDisplay}</div>
+                     <div className="status-label" style={{color: proximityStatus === 'HAZARD' ? '#ff4757' : ringColor, fontSize: '1.8rem', margin: '10px 0', textShadow: `0 0 15px ${proximityStatus === 'HAZARD' ? '#ff4757' : ringColor}80`, fontFamily: 'Outfit', fontWeight: 700}}>{statusDisplay}</div>
                  </div>
               </div>
 
@@ -644,27 +625,6 @@ function App() {
         )}
       </main>
 
-      {/* Posture Danger Modal — auto-dismissed when safe distance restored */}
-      {isPostureDangerModalOpen && (
-        <div className="posture-danger-overlay">
-          <div className="posture-danger-modal">
-            <div className="posture-danger-icon">⚠️</div>
-            <h1 className="posture-danger-title">Posture Alert</h1>
-            <p className="posture-danger-message">
-              You have been closer than 25cm to the screen for 90 seconds.
-              Please sit back immediately to protect your eyes.
-            </p>
-            <div className="posture-danger-badge">
-              Move back beyond 40cm to dismiss
-            </div>
-            <div className="posture-danger-distance">
-              {distanceCm !== null ? `Current Distance: ${distanceCm.toFixed(1)} cm` : 'Calculating...'}
-            </div>
-            <div className="posture-danger-pulse"></div>
-          </div>
-        </div>
-      )}
-
       {/* 80% Full Screen Modal overlay natively in React */}
       {isModalOpen && (
          <div className="fullscreen-modal">
@@ -716,6 +676,22 @@ function App() {
                         setIsModalOpen(false);
                         setTherapyView('initial');
                      }} style={{ marginTop: '3rem', color: '#ff4757' }}>Force Quit (Not Recommended)</button>
+                  </div>
+               ) : therapyView === 'proximity_hazard' ? (
+                  <div className="proximity-hazard-view" style={{ textAlign: 'center', padding: '2rem' }}>
+                     <h1 className="danger-glow pulse-red">PROXIMITY HAZARD</h1>
+                     <div className="warning-icon-large">⚠️</div>
+                     <p style={{ fontSize: '1.4rem', color: '#fff', maxWidth: '600px', margin: '0 auto 2rem' }}>
+                        You have been dangerously close to the screen (&lt; 25cm) for 90 seconds. 
+                        This causes significant **Ciliary Muscle contraction** and long-term vision damage.
+                     </p>
+                     <h2 style={{ color: '#ff4757', fontSize: '2rem', marginBottom: '2rem' }}>Please move back at least 50cm to continue.</h2>
+                     <button className="btn-huge" onClick={() => {
+                        setIsModalOpen(false);
+                        setTherapyView('initial');
+                        engineState.current.proximityStartTime = null;
+                        engineState.current.proximityAlertTriggered = false;
+                     }}>I have adjusted my position</button>
                   </div>
                ) : (
                   <>
