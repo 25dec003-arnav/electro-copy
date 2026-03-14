@@ -7,6 +7,7 @@ import EyeMassage from './EyeMassage';
 import FocusShifter from './assets/FocusShifter.jsx';
 import InfinityTracker from './infinityTracker.jsx';
 import CornerTaps from './corner tap.jsx';
+import { useProximity, PostureCalibration, ProximitySensor } from './setposture';
 
 // Eye Landmark Indices
 const LEFT_EYE = [33, 160, 158, 133, 153, 144];
@@ -43,15 +44,13 @@ function App() {
     const [therapyView, setTherapyView] = useState('initial'); // 'initial', 'menu', or 'active', 'proximity_hazard'
     const [activeModule, setActiveModule] = useState(null);
     const [, setRenderTick] = useState(0);
-    const [lookAwayDisplay, setLookAwayDisplay] = useState(45);
     const [connectionStatus, setConnectionStatus] = useState('idle');
 
-    // New Proximity States
-    const [currentDistance, setCurrentDistance] = useState(null);
-    const [restingDistance, setRestingDistance] = useState(50);
-    const [safeDistanceThreshold, setSafeDistanceThreshold] = useState(35); // Default 35cm as requested
-    const [proximityStatus, setProximityStatus] = useState('SAFE'); // 'SAFE', 'WARNING', 'HAZARD'
-    const [proximityTimeLeft, setProximityTimeLeft] = useState(30);
+    // Use the optimized proximity hook from our new module
+    const proximity = useProximity(() => {
+        setTherapyView('proximity_hazard');
+        setIsModalOpen(true);
+    });
 
     const videoRef = useRef(null);
     const engineState = useRef({
@@ -67,10 +66,7 @@ function App() {
         healthyBlinkStartTime: null,
         lastFaceTime: Date.now(),
         lookAwayActive: false,
-        lookAwayTimeLeft: 0,
-        proximityStartTime: null,
-        proximityAlertTriggered: false,
-        safeThreshold: 35
+        lookAwayTimeLeft: 0
     });
 
     useEffect(() => {
@@ -202,48 +198,7 @@ function App() {
                     const roundedStrain = Math.round(state.strain);
                     setStrainLevel(roundedStrain);
 
-                    // Chrome Extension Integration: Broadcast live strain to content.js
                     window.dispatchEvent(new CustomEvent('OPTISYNC_STRAIN_PING', { detail: { strain: roundedStrain } }));
-
-                    // --- PROXIMITY DETECTION ENGINE ---
-                    // Heuristic: Use the distance between inner eye corners (landmarks 133 and 362)
-                    // Optimized Calibration: Dist_cm = Constant / Normalized_Pixel_Dist
-                    // Constant 5.5 is more accurate for typical laptop webcams (approx 0.11 dist at 50cm)
-                    const innerDist = calculateDistance(landmarks[133], landmarks[362]);
-
-                    // Estimate CM
-                    const estimatedCm = Math.round(5.5 / innerDist);
-                    setCurrentDistance(estimatedCm);
-
-                    // Use ref value to avoid closure staleness after calibration
-                    if (estimatedCm < state.safeThreshold) {
-                        if (!state.proximityStartTime) {
-                            state.proximityStartTime = now;
-                        }
-                        const elapsed = (now - state.proximityStartTime) / 1000;
-                        const remaining = Math.max(0, 30 - elapsed);
-                        setProximityTimeLeft(Math.floor(remaining));
-
-                        if (remaining < 10) {
-                            setProximityStatus('HAZARD');
-                        } else {
-                            setProximityStatus('WARNING');
-                        }
-
-                        // Trigger Alert at 30 seconds
-                        if (remaining <= 0 && !state.proximityAlertTriggered) {
-                            state.proximityAlertTriggered = true;
-                            setTherapyView('proximity_hazard');
-                            setIsModalOpen(true);
-                            NotificationManager.sendProximityAlert();
-                        }
-                    } else {
-                        // Reset proximity timer if they move back
-                        state.proximityStartTime = null;
-                        state.proximityAlertTriggered = false;
-                        setProximityTimeLeft(30);
-                        setProximityStatus('SAFE');
-                    }
 
                 } else {
                     setStatusText("No Face Detected (Resting)");
@@ -456,38 +411,19 @@ function App() {
                         {/* Webcam Frame */}
                         <div className="glass-card webcam-card">
                             <h3>Cognitive Sync Camera</h3>
-                            <div className="video-container">
+                            <div className="video-container" style={{ position: 'relative' }}>
                                 <video ref={videoRef} autoPlay playsInline className="webcam-video"></video>
-                                <div className="webcam-status-overlay" style={{ background: statusText.includes("Face") ? "rgba(255, 71, 87, 0.8)" : "rgba(46, 204, 113, 0.6)" }}>
+                                <div className="webcam-status-overlay" style={{ background: statusText.includes("Tracking") ? "rgba(46, 204, 113, 0.6)" : "rgba(255, 71, 87, 0.8)" }}>
                                     {statusText}
                                 </div>
                             </div>
 
-                            {/* New Calibration Section */}
-                            <div className="calibration-section">
-                                <div className="calib-info">
-                                    <p>Resting Posture: <strong>{restingDistance}cm</strong></p>
-                                    <p>Safe Threshold: <strong style={{ color: '#ff4757' }}>{safeDistanceThreshold}cm</strong></p>
-                                </div>
-                                <button
-                                    className="btn-calibrate"
-                                    onClick={() => {
-                                        if (currentDistance) {
-                                            const newResting = currentDistance;
-                                            const newSafe = Math.max(35, newResting - 10);
-                                            setRestingDistance(newResting);
-                                            setSafeDistanceThreshold(newSafe);
-                                            engineState.current.safeThreshold = newSafe; // Sync to engine ref immediately
-                                            alert(`✅ Resting Posture Calibrated!\n\nNormal Distance: ${newResting}cm\nSafe Distance: ${newSafe}cm (with 10cm margin)`);
-                                        } else {
-                                            alert("❌ No face detected. Please face the camera to calibrate.");
-                                        }
-                                    }}
-                                >
-                                    Set Resting Posture
-                                </button>
-                                <p className="calib-hint">Sit naturally and click to calibrate your safe distance.</p>
-                            </div>
+                            <PostureCalibration 
+                                currentDistance={proximity.currentDistance}
+                                restingDistance={proximity.restingDistance}
+                                safeThreshold={proximity.safeThreshold}
+                                onCalibrate={proximity.calibrate}
+                            />
                         </div>
 
                         {/* Premium Metrics Panel */}
@@ -517,33 +453,20 @@ function App() {
                                     </div>
                                 </div>
 
-                                {/* Block 3: Proximity Sensor */}
-                                <div className={`diagnostic-block proximity-block ${proximityStatus.toLowerCase()}`}>
-                                    <div className="diag-icon">
-                                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" /></svg>
-                                    </div>
-                                    <div className="diag-content">
-                                        <h4>Screen distance</h4>
-                                        <div className="diag-value huge-text">
-                                            {currentDistance || "--"} <span style={{ fontSize: '1rem' }}>cm</span>
-                                        </div>
-                                        <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.4)', marginTop: '-8px' }}>
-                                            Safe Threshold: {safeDistanceThreshold}cm
-                                        </div>
-                                    </div>
-                                    {proximityStatus !== 'SAFE' && (
-                                        <div className="proximity-timer-badge">
-                                            {proximityTimeLeft}s
-                                        </div>
-                                    )}
-                                </div>
+                                {/* Block 3: Proximity Sensor (MODULAR) */}
+                                <ProximitySensor 
+                                    currentDistance={proximity.currentDistance}
+                                    safeThreshold={proximity.safeThreshold}
+                                    proximityStatus={proximity.proximityStatus}
+                                    proximityTimeLeft={proximity.proximityTimeLeft}
+                                />
                             </div>
 
                             {/* Block 4: Status Module */}
-                            <div className="diagnostic-block status-block-premium" style={{ borderColor: proximityStatus === 'HAZARD' ? '#ff4757' : ringColor, background: `rgba(255,255,255,0.02)` }}>
+                            <div className="diagnostic-block status-block-premium" style={{ borderColor: ringColor, background: `rgba(255,255,255,0.02)` }}>
                                 <div className="diag-content" style={{ width: '100%', textAlign: 'center' }}>
                                     <h4 style={{ letterSpacing: '2px', color: 'rgba(255,255,255,0.5)' }}>SYSTEM STATUS OVERRIDE</h4>
-                                    <div className="status-label" style={{ color: proximityStatus === 'HAZARD' ? '#ff4757' : ringColor, fontSize: '1.8rem', margin: '10px 0', textShadow: `0 0 15px ${proximityStatus === 'HAZARD' ? '#ff4757' : ringColor}80`, fontFamily: 'Outfit', fontWeight: 700 }}>{statusDisplay}</div>
+                                    <div className="status-label" style={{ color: ringColor, fontSize: '1.8rem', margin: '10px 0', textShadow: `0 0 15px ${ringColor}80`, fontFamily: 'Outfit', fontWeight: 700 }}>{statusDisplay}</div>
                                 </div>
                             </div>
 
@@ -717,15 +640,12 @@ function App() {
                                 <h1 className="danger-glow pulse-red">PROXIMITY HAZARD</h1>
                                 <div className="warning-icon-large">⚠️</div>
                                 <p style={{ fontSize: '1.4rem', color: '#fff', maxWidth: '600px', margin: '0 auto 2rem' }}>
-                                    You have been dangerously close to the screen (&lt; {safeDistanceThreshold}cm) for 30 seconds.
-                                    This causes significant **Ciliary Muscle contraction** and long-term vision damage.
+                                    Distance violation detected. Long-term proximity causes significant vision damage.
                                 </p>
-                                <h2 style={{ color: '#ff4757', fontSize: '2rem', marginBottom: '2rem' }}>Please move back at least {restingDistance}cm to continue.</h2>
+                                <h2 style={{ color: '#ff4757', fontSize: '2rem', marginBottom: '2rem' }}>Please move back to a safe distance to continue.</h2>
                                 <button className="btn-huge" onClick={() => {
                                     setIsModalOpen(false);
                                     setTherapyView('initial');
-                                    engineState.current.proximityStartTime = null;
-                                    engineState.current.proximityAlertTriggered = false;
                                 }}>I have adjusted my position</button>
                             </div>
                         ) : (
