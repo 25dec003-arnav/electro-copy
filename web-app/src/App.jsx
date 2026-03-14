@@ -8,6 +8,7 @@ import FocusShifter from './assets/FocusShifter.jsx';
 import InfinityTracker from './infinityTracker.jsx';
 import CornerTaps from './corner tap.jsx';
 import Setting from './Setting.jsx';
+import { useProximity, PostureCalibration, ProximitySensor } from './setposture';
 
 // Eye Landmark Indices
 const LEFT_EYE = [33, 160, 158, 133, 153, 144];
@@ -36,7 +37,7 @@ function calculateEAR(landmarks, eyeIndices) {
 
 function App() {
     const [strainLevel, setStrainLevel] = useState(0);
-    const [blinkCount, setBlinkCount] = useState(0);
+    const [blinkRate, setBlinkRate] = useState(0);
     const [liveEAR, setLiveEAR] = useState("0.00");
     const [statusText, setStatusText] = useState("Downloading AI Models (Takes 5-10s first time)...");
     const [activeTab, setActiveTab] = useState('dashboard');
@@ -500,12 +501,19 @@ function App() {
                         {/* Webcam Frame */}
                         <div className="glass-card webcam-card">
                             <h3>Cognitive Sync Camera</h3>
-                            <div className="video-container">
+                            <div className="video-container" style={{ position: 'relative' }}>
                                 <video ref={videoRef} autoPlay playsInline className="webcam-video"></video>
-                                <div className="webcam-status-overlay" style={{ background: statusText.includes("Face") ? "rgba(255, 71, 87, 0.8)" : "rgba(46, 204, 113, 0.6)" }}>
+                                <div className="webcam-status-overlay" style={{ background: statusText.includes("Tracking") ? "rgba(46, 204, 113, 0.6)" : "rgba(255, 71, 87, 0.8)" }}>
                                     {statusText}
                                 </div>
                             </div>
+
+                            <PostureCalibration 
+                                currentDistance={proximity.currentDistance}
+                                restingDistance={proximity.restingDistance}
+                                safeThreshold={proximity.safeThreshold}
+                                onCalibrate={proximity.calibrate}
+                            />
                         </div>
 
                         {/* Premium Metrics Panel */}
@@ -519,8 +527,8 @@ function App() {
                                         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" /><circle cx="12" cy="12" r="3" /></svg>
                                     </div>
                                     <div className="diag-content">
-                                        <h4>Session Blinks</h4>
-                                        <div className="diag-value huge-text">{blinkCount}</div>
+                                        <h4>Blinks Per Min</h4>
+                                        <div className="diag-value huge-text">{blinkRate}</div>
                                     </div>
                                 </div>
 
@@ -748,6 +756,12 @@ function App() {
                                     setTherapyView('initial');
                                     engineState.current.proximityStartTime = null;
                                     engineState.current.proximityAlertTriggered = false;
+                                    Distance violation detected. Long-term proximity causes significant vision damage.
+                                </p>
+                                <h2 style={{ color: '#ff4757', fontSize: '2rem', marginBottom: '2rem' }}>Please move back to a safe distance to continue.</h2>
+                                <button className="btn-huge" onClick={() => {
+                                    setIsModalOpen(false);
+                                    setTherapyView('initial');
                                 }}>I have adjusted my position</button>
                             </div>
                         ) : (
