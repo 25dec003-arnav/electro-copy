@@ -633,57 +633,192 @@ body.light-mode .metrics-panel h3 {
     from { transform: translateY(-20px); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
 }
-=======
 
-/* Calibration Section Below Webcam */
-.calibration-section {
+/* --- Premium Posture & Proximity UI --- */
+
+.calibration-box {
     width: 100%;
     margin-top: 1.5rem;
     padding: 1.5rem;
-    background: rgba(255, 255, 255, 0.03);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 20px;
     display: flex;
     flex-direction: column;
-    gap: 1rem;
-    align-items: center;
+    gap: 1.25rem;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
 }
 
-.calib-info {
+.calib-header {
     display: flex;
+    align-items: center;
     justify-content: space-between;
-    width: 100%;
-    color: var(--text-main);
-    font-size: 0.9rem;
+    padding: 0 0.5rem;
 }
 
-.calib-info strong {
-    font-size: 1.1rem;
-    color: var(--accent-teal);
+.calib-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
-.btn-calibrate {
+.calib-stat .label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    letter-spacing: 1px;
+}
+
+.calib-stat .value {
+    font-size: 1.25rem;
+    font-weight: 700;
+    font-family: 'Outfit', sans-serif;
+}
+
+.calib-divider {
+    width: 1px;
+    height: 30px;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.teal-glow { color: #1abc9c; text-shadow: 0 0 10px rgba(26, 188, 156, 0.4); }
+.danger-glow-small { color: #ff4757; text-shadow: 0 0 10px rgba(255, 71, 87, 0.4); }
+
+.btn-calibrate-premium {
     width: 100%;
     background: linear-gradient(135deg, #1abc9c, #2ecc71);
     color: white;
     border: none;
-    padding: 12px;
+    padding: 14px;
     border-radius: 12px;
     font-weight: 700;
+    font-size: 1rem;
     cursor: pointer;
-    transition: all 0.3s ease;
-    box-shadow: 0 4px 15px rgba(26, 188, 156, 0.2);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    box-shadow: 0 4px 15px rgba(26, 188, 156, 0.3);
 }
 
-.btn-calibrate:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 25px rgba(26, 188, 156, 0.4);
+.btn-calibrate-premium:hover:not(:disabled) {
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 0 8px 25px rgba(26, 188, 156, 0.5);
     filter: brightness(1.1);
 }
 
-.calib-hint {
+.btn-calibrate-premium:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    filter: grayscale(0.5);
+}
+
+.calib-footer p {
     font-size: 0.75rem;
     color: var(--text-muted);
-    font-style: italic;
+    text-align: center;
     margin: 0;
+    opacity: 0.7;
+}
+
+/* Proximity Card Premium */
+.proximity-card-premium {
+    min-height: 140px;
+    position: relative;
+    padding-left: 1.5rem !important;
+}
+
+.diag-icon-wrapper {
+    width: 50px;
+    height: 50px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 1rem;
+}
+
+.diag-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    margin-bottom: 0.25rem;
+}
+
+.hazard-badge {
+    background: rgba(255, 71, 87, 0.2);
+    border: 1px solid #ff4757;
+    color: #ff4757;
+    padding: 4px 10px;
+    border-radius: 100px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    animation: proximityPulse 2s infinite;
+}
+
+.dist-value-container {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin: 0.5rem 0;
+}
+
+.dist-number {
+    font-size: 3rem;
+    font-weight: 800;
+    font-family: 'Outfit';
+    color: white;
+    line-height: 1;
+}
+
+.dist-unit {
+    font-size: 1rem;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.threshold-indicator {
+    width: 100%;
+    margin-top: 1rem;
+}
+
+.threshold-indicator .track {
+    width: 100%;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 2px;
+    position: relative;
+    margin-bottom: 8px;
+}
+
+.threshold-indicator .thumb {
+    width: 8px;
+    height: 8px;
+    background: white;
+    border-radius: 50%;
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 10px white;
+    transition: left 0.3s ease;
+}
+
+.threshold-indicator .safe-zone-marker {
+    width: 2px;
+    height: 12px;
+    background: #ff4757;
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    box-shadow: 0 0 8px #ff4757;
+}
+
+.threshold-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
 }

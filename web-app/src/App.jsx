@@ -38,6 +38,7 @@ function calculateEAR(landmarks, eyeIndices) {
 function App() {
     const [strainLevel, setStrainLevel] = useState(0);
     const [blinkRate, setBlinkRate] = useState(0);
+    const [blinkCount, setBlinkCount] = useState(0);
     const [liveEAR, setLiveEAR] = useState("0.00");
     const [statusText, setStatusText] = useState("Downloading AI Models (Takes 5-10s first time)...");
     const [activeTab, setActiveTab] = useState('dashboard');
@@ -48,10 +49,12 @@ function App() {
     const [lookAwayDisplay, setLookAwayDisplay] = useState(45);
     const [connectionStatus, setConnectionStatus] = useState('idle');
 
-    // New Proximity States
-    const [currentDistance, setCurrentDistance] = useState(null);
-    const [proximityStatus, setProximityStatus] = useState('SAFE'); // 'SAFE', 'WARNING', 'HAZARD'
-    const [proximityTimeLeft, setProximityTimeLeft] = useState(90);
+    // Restore the proximity hook for clean state management & calibration
+    const proximity = useProximity(() => {
+        setTherapyView('proximity_hazard');
+        setIsModalOpen(true);
+    });
+
     const [isLightMode, setIsLightMode] = useState(localStorage.getItem('lightMode') === 'true');
 
     useEffect(() => {
@@ -208,6 +211,7 @@ function App() {
 
                     state.blinkHistory = state.blinkHistory.filter(timestamp => now - timestamp <= 60000);
                     const bpm = state.blinkHistory.length;
+                    setBlinkRate(bpm);
 
                     // Staring Penalty
                     if (bpm < 5) {
@@ -226,46 +230,7 @@ function App() {
                     // Chrome Extension Integration: Broadcast live strain to content.js
                     window.dispatchEvent(new CustomEvent('OPTISYNC_STRAIN_PING', { detail: { strain: roundedStrain } }));
 
-                    // --- PROXIMITY DETECTION ENGINE ---
-                    // Heuristic: Use the distance between inner eye corners (landmarks 133 and 362)
-                    // On a standard 720p/1080p webcam, 25cm is roughly where the eye-span takes up ~18% of frame width.
-                    const innerDist = calculateDistance(landmarks[133], landmarks[362]);
-
-                    // Estimate CM (Rough calibration: 25cm approx 0.18 normalized dist)
-                    // Formula: Dist_cm = Constant / Normalized_Pixel_Dist
-                    const estimatedCm = Math.round(4.5 / innerDist);
-                    setCurrentDistance(estimatedCm);
-
-                    if (estimatedCm < 25) {
-                        if (!state.proximityStartTime) {
-                            state.proximityStartTime = now;
-                        }
-                        const elapsed = (now - state.proximityStartTime) / 1000;
-                        const remaining = Math.max(0, 90 - elapsed);
-                        setProximityTimeLeft(Math.floor(remaining));
-
-                        if (remaining < 30) {
-                            setProximityStatus('HAZARD');
-                        } else {
-                            setProximityStatus('WARNING');
-                        }
-
-                        // Trigger Alert at 90 seconds
-                        if (remaining <= 0 && !state.proximityAlertTriggered) {
-                            state.proximityAlertTriggered = true;
-                            setTherapyView('proximity_hazard');
-                            if (localStorage.getItem('notificationsEnabled') !== 'false') {
-                                setIsModalOpen(true);
-                                NotificationManager.sendProximityAlert();
-                            }
-                        } else {
-                            // Reset proximity timer if they move back
-                            state.proximityStartTime = null;
-                            state.proximityAlertTriggered = false;
-                            setProximityTimeLeft(90);
-                            setProximityStatus('SAFE');
-                        }
-                    }
+                    // Proximity is handled by the useProximity hook via the 'OPTISYNC_LANDMARKS' event
 
                 } else {
                     setStatusText("No Face Detected (Resting)");
@@ -544,29 +509,19 @@ function App() {
                                 </div>
 
                                 {/* Block 3: Proximity Sensor */}
-                                <div className={`diagnostic-block proximity-block ${proximityStatus.toLowerCase()}`}>
-                                    <div className="diag-icon">
-                                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" /></svg>
-                                    </div>
-                                    <div className="diag-content">
-                                        <h4>Screen distance</h4>
-                                        <div className="diag-value huge-text">
-                                            {currentDistance || "--"} <span style={{ fontSize: '1rem' }}>cm</span>
-                                        </div>
-                                    </div>
-                                    {proximityStatus !== 'SAFE' && (
-                                        <div className="proximity-timer-badge">
-                                            {proximityTimeLeft}s
-                                        </div>
-                                    )}
-                                </div>
+                                <ProximitySensor 
+                                    currentDistance={proximity.currentDistance}
+                                    safeThreshold={proximity.safeThreshold}
+                                    proximityStatus={proximity.proximityStatus}
+                                    proximityTimeLeft={proximity.proximityTimeLeft}
+                                />
                             </div>
 
                             {/* Block 4: Status Module */}
-                            <div className="diagnostic-block status-block-premium" style={{ borderColor: proximityStatus === 'HAZARD' ? '#ff4757' : ringColor, background: `rgba(255,255,255,0.02)` }}>
+                            <div className="diagnostic-block status-block-premium" style={{ borderColor: proximity.proximityStatus === 'HAZARD' ? '#ff4757' : ringColor, background: `rgba(255,255,255,0.02)` }}>
                                 <div className="diag-content" style={{ width: '100%', textAlign: 'center' }}>
                                     <h4 style={{ letterSpacing: '2px', color: 'rgba(255,255,255,0.5)' }}>SYSTEM STATUS OVERRIDE</h4>
-                                    <div className="status-label" style={{ color: proximityStatus === 'HAZARD' ? '#ff4757' : ringColor, fontSize: '1.8rem', margin: '10px 0', textShadow: `0 0 15px ${proximityStatus === 'HAZARD' ? '#ff4757' : ringColor}80`, fontFamily: 'Outfit', fontWeight: 700 }}>{statusDisplay}</div>
+                                    <div className="status-label" style={{ color: proximity.proximityStatus === 'HAZARD' ? '#ff4757' : ringColor, fontSize: '1.8rem', margin: '10px 0', textShadow: `0 0 15px ${proximity.proximityStatus === 'HAZARD' ? '#ff4757' : ringColor}80`, fontFamily: 'Outfit', fontWeight: 700 }}>{statusDisplay}</div>
                                 </div>
                             </div>
 
@@ -756,12 +711,6 @@ function App() {
                                     setTherapyView('initial');
                                     engineState.current.proximityStartTime = null;
                                     engineState.current.proximityAlertTriggered = false;
-                                    Distance violation detected. Long-term proximity causes significant vision damage.
-                                </p>
-                                <h2 style={{ color: '#ff4757', fontSize: '2rem', marginBottom: '2rem' }}>Please move back to a safe distance to continue.</h2>
-                                <button className="btn-huge" onClick={() => {
-                                    setIsModalOpen(false);
-                                    setTherapyView('initial');
                                 }}>I have adjusted my position</button>
                             </div>
                         ) : (
