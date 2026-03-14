@@ -5,6 +5,7 @@ import PalmingAudio from './PalmingAudio';
 import Module20 from './20Module';
 import EyeMassage from './EyeMassage';
 import FocusShifter from './assets/FocusShifter.jsx';
+import HistoryLog from './HistoryLog.jsx';
 import InfinityTracker from './infinityTracker.jsx';
 import CornerTaps from './corner tap.jsx';
 import Setting from './Setting.jsx';
@@ -35,6 +36,27 @@ function calculateEAR(landmarks, eyeIndices) {
     return (dist2_6 + dist3_5) / (2.0 * dist1_4);
 }
 
+// --- In-App Toast Notification Component ---
+function StrainToast({ toast, onClose }) {
+    useEffect(() => {
+        if (!toast) return;
+        const t = setTimeout(onClose, 6000);
+        return () => clearTimeout(t);
+    }, [toast]);
+
+    if (!toast) return null;
+    return (
+        <div className={`strain-toast ${toast.type}`} onClick={onClose}>
+            <div className="toast-icon">{toast.type === 'critical' ? '🚨' : '⚠️'}</div>
+            <div className="toast-body">
+                <div className="toast-title">{toast.title}</div>
+                <div className="toast-message">{toast.message}</div>
+            </div>
+            <button className="toast-close" onClick={onClose}>✕</button>
+        </div>
+    );
+}
+
 function App() {
     const [strainLevel, setStrainLevel] = useState(0);
     const [blinkRate, setBlinkRate] = useState(0);
@@ -43,13 +65,15 @@ function App() {
     const [statusText, setStatusText] = useState("Downloading AI Models (Takes 5-10s first time)...");
     const [activeTab, setActiveTab] = useState('dashboard');
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [therapyView, setTherapyView] = useState('initial'); // 'initial', 'menu', or 'active', 'proximity_hazard'
+    const [therapyView, setTherapyView] = useState('initial');
     const [activeModule, setActiveModule] = useState(null);
+    const [backendStatus, setBackendStatus] = useState('checking');
     const [, setRenderTick] = useState(0);
     const [lookAwayDisplay, setLookAwayDisplay] = useState(45);
     const [connectionStatus, setConnectionStatus] = useState('idle');
+    const [toast, setToast] = useState(null); // { title, message, type: 'warning'|'critical' }
 
-    // Restore the proximity hook for clean state management & calibration
+    // Proximity hook for clean state management & calibration
     const proximity = useProximity(() => {
         setTherapyView('proximity_hazard');
         setIsModalOpen(true);
@@ -68,7 +92,6 @@ function App() {
 
     useEffect(() => {
         const handleCamChange = () => {
-            // Force re-render of dashboard to reset camera if we are on dashboard tab
             if (activeTab === 'dashboard') {
                 setActiveTab('settings');
                 setTimeout(() => setActiveTab('dashboard'), 100);
@@ -77,6 +100,19 @@ function App() {
         window.addEventListener('OPTISYNC_CAMERA_CHANGE', handleCamChange);
         return () => window.removeEventListener('OPTISYNC_CAMERA_CHANGE', handleCamChange);
     }, [activeTab]);
+
+    // Backend health check
+    useEffect(() => {
+        const checkBackend = () => {
+            fetch('http://localhost:5001/api/health')
+                .then(res => res.json())
+                .then(data => setBackendStatus(data.mongodb === 'Connected' ? 'live' : 'error'))
+                .catch(() => setBackendStatus('offline'));
+        };
+        checkBackend();
+        const interval = setInterval(checkBackend, 30000);
+        return () => clearInterval(interval);
+    }, []);
 
     const videoRef = useRef(null);
     const engineState = useRef({
@@ -94,7 +130,11 @@ function App() {
         lookAwayActive: false,
         lookAwayTimeLeft: 0,
         proximityStartTime: null,
-        proximityAlertTriggered: false
+        proximityAlertTriggered: false,
+        // Strain alert tracking
+        warningNotifiedAt: 0,       // timestamp of last 80% OS notification
+        criticalTriggered: false,   // whether 100% modal has been triggered this cycle
+        warningToastShownAt: 0      // timestamp of last in-app toast
     });
 
     useEffect(() => {
@@ -230,6 +270,56 @@ function App() {
                     // Chrome Extension Integration: Broadcast live strain to content.js
                     window.dispatchEvent(new CustomEvent('OPTISYNC_STRAIN_PING', { detail: { strain: roundedStrain } }));
 
+                    // ── STRAIN ALERT SYSTEM ──────────────────────────────────────────
+                    const notificationsEnabled = localStorage.getItem('notificationsEnabled') !== 'false';
+
+                    // 80% WARNING: In-app toast + OS notification (works in background)
+                    if (roundedStrain >= 80 && roundedStrain < 100) {
+                        const toastCooldown = 60000; // Only re-toast every 60s
+                        if (notificationsEnabled && now - state.warningToastShownAt > toastCooldown) {
+                            state.warningToastShownAt = now;
+                            // In-app toast (WhatsApp-style)
+                            setToast({
+                                type: 'warning',
+                                title: 'Eye Strain Warning ⚠️',
+                                message: `Strain at ${roundedStrain}%. Look away or start a therapy session to recover.`
+                            });
+                            // OS notification (works even in other tabs/apps)
+                            const osCooldown = 120000; // OS notification every 2 min
+                            if (now - state.warningNotifiedAt > osCooldown) {
+                                state.warningNotifiedAt = now;
+                                NotificationManager.sendHighFatigueAlert(roundedStrain);
+                            }
+                        }
+                        // Reset the 100% trigger if strain drops back below 100
+                        state.criticalTriggered = false;
+                    }
+
+                    // 100% CRITICAL: Focus tab + open modal + OS notification + toast
+                    if (roundedStrain >= 100 && !state.criticalTriggered && !state.modalTriggered && now > state.modalCooldownUntil) {
+                        state.criticalTriggered = true;
+                        state.modalTriggered = true;
+                        // In-app toast
+                        setToast({
+                            type: 'critical',
+                            title: '🚨 CRITICAL: Max Eye Strain',
+                            message: 'Strain at 100%! Opening therapy module now to protect your vision.'
+                        });
+                        // OS Notification (brings user back if they are in another app)
+                        NotificationManager.sendCriticalStrainAlert();
+                        // Force focus this tab
+                        window.focus();
+                        // Bring up the therapeutic intervention modal
+                        setTherapyView('menu');
+                        setIsModalOpen(true);
+                    }
+
+                    // Reset critical once strain drops below 80 (full recovery)
+                    if (roundedStrain < 80) {
+                        state.criticalTriggered = false;
+                    }
+                    // ── END STRAIN ALERT SYSTEM ──────────────────────────────────────
+
                     // Proximity is handled by the useProximity hook via the 'OPTISYNC_LANDMARKS' event
 
                 } else {
@@ -313,6 +403,51 @@ function App() {
         };
     }, [activeTab]); // Re-run if we switch back to dashboard
 
+    // Periodically post the current strain to the backend to build the history log
+    useEffect(() => {
+        const syncInterval = setInterval(() => {
+            const currentStrain = engineState.current?.strain || 0;
+            const currentBlinks = engineState.current?.blinks || 0;
+
+            if (activeTab === 'dashboard') {
+                fetch('http://localhost:5001/api/strain', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ strain: Math.round(currentStrain), blinkCount: currentBlinks })
+                }).catch(err => console.log('Backend sync warning: is server running?'));
+            }
+        }, 15000); // Sync every 15 seconds
+
+        return () => clearInterval(syncInterval);
+    }, [activeTab]);
+
+    // Flash the document title when strain >= 80% and user is in another tab
+    useEffect(() => {
+        const originalTitle = 'OptiSync OS';
+        let flashInterval = null;
+
+        if (strainLevel >= 100) {
+            let toggle = false;
+            flashInterval = setInterval(() => {
+                document.title = toggle ? '🚨 CRITICAL STRAIN - OptiSync' : '⚠️ ACT NOW - OptiSync OS';
+                toggle = !toggle;
+            }, 800);
+        } else if (strainLevel >= 80) {
+            let toggle = false;
+            flashInterval = setInterval(() => {
+                document.title = toggle ? '⚠️ High Eye Strain - OptiSync' : 'OptiSync OS';
+                toggle = !toggle;
+            }, 1500);
+        } else {
+            document.title = originalTitle;
+        }
+
+        return () => {
+            if (flashInterval) clearInterval(flashInterval);
+            document.title = originalTitle;
+        };
+    }, [strainLevel]);
+
     const ringColor = strainLevel > 75 ? '#ff4757' : strainLevel > 40 ? '#f39c12' : '#2ecc71';
     const statusDisplay = statusText.includes("Tracking")
         ? (strainLevel > 75 ? "Severe Strain" : strainLevel > 40 ? "Strain Building" : "Eyes Rested")
@@ -373,6 +508,8 @@ function App() {
         // They completed the therapy, so strain actually drops to 0 mathematically!
         engineState.current.strain = 0;
         engineState.current.modalTriggered = false;
+        engineState.current.criticalTriggered = false;
+        engineState.current.warningToastShownAt = 0;
         engineState.current.modalCooldownUntil = Date.now() + 60000; // 1 minute grace period
         setStrainLevel(0);
 
@@ -388,6 +525,9 @@ function App() {
 
     return (
         <div className="dashboard-container">
+            {/* Global In-App Strain Toast */}
+            <StrainToast toast={toast} onClose={() => setToast(null)} />
+
             {/* Sidebar */}
             <aside className="sidebar">
                 <div className="brand">
@@ -406,13 +546,28 @@ function App() {
                     <li className={`nav-link ${activeTab === 'therapy' ? 'active' : ''}`} onClick={() => setActiveTab('therapy')}>
                         <span>✦</span> Therapy Modules
                     </li>
-                    <li className="nav-link">
+                    <li className={`nav-link ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}>
                         <span>◷</span> History Log
                     </li>
                     <li className={`nav-link ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
                         <span>⚙</span> Settings
                     </li>
                 </ul>
+
+                <div className="sidebar-footer" style={{ marginTop: 'auto', padding: '20px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{
+                            width: '8px',
+                            height: '8px',
+                            borderRadius: '50%',
+                            background: backendStatus === 'live' ? '#2ecc71' : backendStatus === 'checking' ? '#f1c40f' : '#ff4757',
+                            boxShadow: `0 0 8px ${backendStatus === 'live' ? '#2ecc71' : backendStatus === 'checking' ? '#f1c40f' : '#ff4757'}`
+                        }}></div>
+                        <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                            Backend {backendStatus === 'live' ? 'Live' : backendStatus === 'checking' ? 'Connecting...' : 'Offline'}
+                        </span>
+                    </div>
+                </div>
             </aside>
 
             {/* Main Content */}
@@ -453,9 +608,9 @@ function App() {
                             alignItems: 'center',
                             gap: '8px'
                         }}>
-                        {connectionStatus === 'idle' && <><span>🔗</span> Link Chrome Extension & Enable Alerts</>}
+                        {connectionStatus === 'idle' && <><span>🔗</span> Link Chrome Extension &amp; Enable Alerts</>}
                         {connectionStatus === 'connecting' && <><span>⌛</span> Requesting Permissions...</>}
-                        {connectionStatus === 'active' && <><span>✅</span> OptiSync Linked & Active</>}
+                        {connectionStatus === 'active' && <><span>✅</span> OptiSync Linked &amp; Active</>}
                         {connectionStatus === 'error' && <><span>❌</span> Permission Denied (Check Settings)</>}
                     </button>
                 </header>
@@ -473,7 +628,7 @@ function App() {
                                 </div>
                             </div>
 
-                            <PostureCalibration 
+                            <PostureCalibration
                                 currentDistance={proximity.currentDistance}
                                 restingDistance={proximity.restingDistance}
                                 safeThreshold={proximity.safeThreshold}
@@ -486,7 +641,7 @@ function App() {
                             <h3 style={{ marginBottom: '2rem', fontSize: '1.4rem', color: '#fff', fontWeight: '500' }}>Live Diagnostics</h3>
 
                             <div className="metrics-grid">
-                                {/* Block 1: Blinks */}
+                                {/* Block 1: Blinks Per Minute */}
                                 <div className="diagnostic-block">
                                     <div className="diag-icon">
                                         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" /><circle cx="12" cy="12" r="3" /></svg>
@@ -509,7 +664,7 @@ function App() {
                                 </div>
 
                                 {/* Block 3: Proximity Sensor */}
-                                <ProximitySensor 
+                                <ProximitySensor
                                     currentDistance={proximity.currentDistance}
                                     safeThreshold={proximity.safeThreshold}
                                     proximityStatus={proximity.proximityStatus}
@@ -573,7 +728,7 @@ function App() {
                             <div className="therapy-card" onClick={() => handleTherapyClick('Palming Audio')}>
                                 <div className="icon">🎧</div>
                                 <h3>Palming Audio</h3>
-                                <p>Guided sensory deprivation to reset rod & cone fatigue.</p>
+                                <p>Guided sensory deprivation to reset rod &amp; cone fatigue.</p>
                             </div>
                             <div className="therapy-card" onClick={() => handleTherapyClick('20-20-20 Module')}>
                                 <div className="icon">⏱️</div>
@@ -595,7 +750,7 @@ function App() {
                             setActiveTab('therapy');
                             engineState.current.strain = 0;
                             engineState.current.modalTriggered = false;
-                            engineState.current.modalCooldownUntil = Date.now() + 60000; // 1 minute grace period
+                            engineState.current.modalCooldownUntil = Date.now() + 60000;
                             setStrainLevel(0);
                             alert("✅ Therapy Sequence Complete!\n\nYour eye strain has been safely reset to 0%.");
                         }}
@@ -635,6 +790,10 @@ function App() {
                             setActiveTab('therapy');
                         }}
                     />
+                )}
+
+                {activeTab === 'history' && (
+                    <HistoryLog />
                 )}
 
                 {activeTab === 'settings' && (

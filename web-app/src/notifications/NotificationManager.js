@@ -4,12 +4,12 @@ export class NotificationManager {
       console.warn("This browser does not support desktop notifications.");
       return false;
     }
-    
+
     if (Notification.permission === "default") {
       const permission = await Notification.requestPermission();
       return permission === "granted";
     }
-    
+
     return Notification.permission === "granted";
   }
 
@@ -17,41 +17,69 @@ export class NotificationManager {
     if (!("Notification" in window)) return;
     if (Notification.permission === "granted") {
       try {
-        const n = new Notification("OptiSync OS: Connection Verified", {
-          body: "Your cognitive operating system is now synchronized with the Chrome extension. We'll monitor your strain and alert you when a reset is needed.",
+        const n = new Notification("OptiSync OS: Connection Verified ✅", {
+          body: "Your cognitive OS is now synchronized. We'll monitor your eye strain and alert you when a reset is needed.",
           icon: "/vite.svg",
           tag: "optisync-connect",
           requireInteraction: false
         });
-        n.onclick = () => window.focus();
+        n.onclick = () => { window.focus(); n.close(); };
       } catch (e) {
         console.error("Failed to send test notification:", e);
       }
     }
   }
 
+  /**
+   * 80% Strain Warning - OS Notification (shows even when in another tab/app)
+   */
   static sendHighFatigueAlert(strainLevel) {
     if (!("Notification" in window)) return;
 
     if (Notification.permission === "granted") {
       try {
-        const notification = new Notification("OptiSync: High Fatigue Alert", {
-          body: `Your eye strain has reached ${strainLevel}%. Please take a break immediately!`,
+        // Close any previous strain alert first (by using same tag)
+        const notification = new Notification("⚠️ OptiSync: High Eye Strain", {
+          body: `Your strain level is now at ${strainLevel}%. Take a short break to prevent fatigue buildup.`,
           icon: "/vite.svg",
-          requireInteraction: true // Ensures it stays on screen until dismissed so the user actually sees it!
+          tag: "optisync-strain-warning",  // same tag so it replaces, not stacks
+          requireInteraction: false,
+          silent: false
         });
-        
-        notification.onclick = function() {
-          window.focus(); // Brings the browser tab into focus
+
+        notification.onclick = function () {
+          window.focus();
           this.close();
         };
       } catch (e) {
-        console.error("Failed to send notification:", e);
+        console.error("Failed to send fatigue notification:", e);
       }
-    } else if (Notification.permission === "default") {
-      // Don't request inside the background worker! Simply log it.
-      console.warn("Notification permission is not granted. Cannot send background alert.");
-      // If we are in the foreground, we could request it, but typically we shouldn't unless triggered by click.
+    }
+  }
+
+  /**
+   * 100% Strain Critical - Focuses the tab and triggers the modal
+   */
+  static sendCriticalStrainAlert() {
+    if (!("Notification" in window)) return;
+
+    if (Notification.permission === "granted") {
+      try {
+        const notification = new Notification("🚨 CRITICAL: Max Eye Strain Reached", {
+          body: "Your strain has hit 100%! Serious eye damage risk. Click to open OptiSync and start a recovery session NOW.",
+          icon: "/vite.svg",
+          tag: "optisync-strain-critical",
+          requireInteraction: true,  // Stays on screen until dismissed
+          silent: false
+        });
+
+        notification.onclick = function () {
+          window.focus();
+          this.close();
+        };
+      } catch (e) {
+        console.error("Failed to send critical notification:", e);
+      }
     }
   }
 
@@ -60,18 +88,19 @@ export class NotificationManager {
 
     if (Notification.permission === "granted") {
       try {
-        const notification = new Notification("CRITICAL: Proximity Hazard", {
-          body: "You have been too close to the screen for over 90 seconds. This is damaging your vision. Please move back!",
+        const notification = new Notification("🚨 CRITICAL: Proximity Hazard", {
+          body: "You've been too close to the screen for over 90 seconds. This is damaging your vision. Please move back immediately!",
           icon: "/vite.svg",
+          tag: "optisync-proximity",
           requireInteraction: true
         });
-        
-        notification.onclick = function() {
+
+        notification.onclick = function () {
           window.focus();
           this.close();
         };
       } catch (e) {
-        console.error("Failed to send notification:", e);
+        console.error("Failed to send proximity notification:", e);
       }
     }
   }
