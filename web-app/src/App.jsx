@@ -50,8 +50,10 @@ function App() {
   
   // New Proximity States
   const [currentDistance, setCurrentDistance] = useState(null);
+  const [restingDistance, setRestingDistance] = useState(50);
+  const [safeDistanceThreshold, setSafeDistanceThreshold] = useState(35); // Default 35cm as requested
   const [proximityStatus, setProximityStatus] = useState('SAFE'); // 'SAFE', 'WARNING', 'HAZARD'
-  const [proximityTimeLeft, setProximityTimeLeft] = useState(90);
+  const [proximityTimeLeft, setProximityTimeLeft]] = useState(90);
 
   useEffect(() => {
     const checkBackend = () => {
@@ -80,7 +82,8 @@ function App() {
     lookAwayActive: false,
     lookAwayTimeLeft: 0,
     proximityStartTime: null,
-    proximityAlertTriggered: false
+    proximityAlertTriggered: false,
+    safeThreshold: 35
   });
 
   useEffect(() => {
@@ -733,10 +736,10 @@ function App() {
                      <h1 className="danger-glow pulse-red">PROXIMITY HAZARD</h1>
                      <div className="warning-icon-large">⚠️</div>
                      <p style={{ fontSize: '1.4rem', color: '#fff', maxWidth: '600px', margin: '0 auto 2rem' }}>
-                        You have been dangerously close to the screen (&lt; 25cm) for 90 seconds. 
+                        You have been dangerously close to the screen (&lt; {safeDistanceThreshold}cm) for 30 seconds. 
                         This causes significant **Ciliary Muscle contraction** and long-term vision damage.
                      </p>
-                     <h2 style={{ color: '#ff4757', fontSize: '2rem', marginBottom: '2rem' }}>Please move back at least 50cm to continue.</h2>
+                     <h2 style={{ color: '#ff4757', fontSize: '2rem', marginBottom: '2rem' }}>Please move back at least {restingDistance}cm to continue.</h2>
                      <button className="btn-huge" onClick={() => {
                         setIsModalOpen(false);
                         setTherapyView('initial');
